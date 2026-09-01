@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard de Facturas y Costos — Arquitectura N-Capas{% endblock %}
+
+{% block content %}
+<header>
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <h1>Dashboard de Facturas y Costos de Medicamentos</h1>
+      <span class="sub" id="sourceInfo">Cargando datos desde la Capa de Negocio...</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span style="background: #1c2b38; padding: 4px 10px; border-radius: 6px; font-size: 12px; border: 1px solid #2a3b4a; color: #4da3ff;">
+        Arquitectura N-Capas (4-Tier)
+      </span>
+      <a href="{{ url_for('auth.logout') }}" style="color: #f0616d; text-decoration: none; font-size: 13px; font-weight: bold; padding: 6px 12px; border: 1px solid #f0616d; border-radius: 6px;">Cerrar sesión</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap" id="tabFacturas">
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>Buscar medicamento</h2>
+    <div class="filters">
+      <div class="full">
+        <label for="qMed">Nombre, parte del nombre, principio activo o concentración</label>
+        <input id="qMed" type="text" placeholder="Ej: paracetamol, amoxicilina 500, cardivas 12.5...">
+      </div>
+      <div>
+        <label for="fFechaDesde">Fecha desde</label>
+        <input id="fFechaDesde" type="date">
+      </div>
+      <div>
+        <label for="fFechaHasta">Fecha hasta</label>
+        <input id="fFechaHasta" type="date">
+      </div>
+      <div>
+        <label for="fProveedor">Proveedor</label>
+        <select id="fProveedor"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <label for="fEstado">Estado del PDF</label>
+        <select id="fEstado">
+          <option value="">Todos</option>
+          <option value="encontrado">PDF encontrado</option>
+          <option value="no_encontrado">PDF no encontrado</option>
+          <option value="posible">Posible coincidencia</option>
+          <option value="vacio">Sin número de documento</option>
+        </select>
+      </div>
+      <div>
+        <label for="fDocumento">Número de factura</label>
+        <input id="fDocumento" type="text" placeholder="Ej: F002-00012780">
+      </div>
+      <div>
+        <label for="fArchivo">Nombre de archivo PDF</label>
+        <input id="fArchivo" type="text" placeholder="Ej: F002-00012780 08.06.pdf">
+      </div>
+    </div>
+    <div class="row-actions">
+      <button class="primary" id="btnBuscar">Buscar</button>
+      <button class="ghost" id="btnLimpiar">Limpiar filtros</button>
+      <button class="ghost" id="btnSoloProblemas">Ver solo registros con problemas de PDF</button>
+    </div>
+    <div id="fuzzyBox"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Resultados</h2>
+    <div class="result-meta" id="resultMeta"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-k="fecha">Fecha</th>
+            <th data-k="proveedor">Proveedor</th>
+            <th data-k="documento">N° factura</th>
+            <th data-k="producto">Medicamento</th>
+            <th data-k="cantidad">Cant.</th>
+            <th data-k="um">U.M.</th>
+            <th data-k="precio_unitario">Precio unit.</th>
+            <th data-k="importe_total">Importe total</th>
+            <th data-k="costo_unidad">Costo/unidad</th>
+            <th data-k="pdf_status">Estado PDF</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="small" id="btnPrev">‹ Anterior</button>
+      <span id="pagerInfo"></span>
+      <button class="small" id="btnNext">Siguiente ›</button>
+    </div>
+  </div>
+
+  <div class="panel" id="detailPanel" style="display:none;">
+    <h2>Detalle del registro seleccionado</h2>
+    <div class="detail-grid">
+      <div>
+        <div class="kv" id="detailKv"></div>
+        <div id="candidatesArea"></div>
+      </div>
+      <div>
+        <div class="pdf-frame-wrap" id="pdfFrameWrap">
+          <div class="pdf-empty">Seleccione un registro para previsualizar su PDF.</div>
+        </div>
+        <div class="hint" id="pdfHint"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Reporte de inconsistencias</h2>
+    <div class="inconsistency-list" id="inconsList"></div>
+    <div class="hint">Haga clic en un indicador para filtrar la tabla con esos registros.</div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% endblock %}
