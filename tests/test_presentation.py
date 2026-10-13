@@ -19,7 +19,7 @@ class TestPresentationControllers(unittest.TestCase):
     def test_login_page_renders(self):
         response = self.client.get("/login")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"N-Layer Architecture", response.data)
+        self.assertIn("Dashboard de Facturas y Costos".encode("utf-8"), response.data)
 
     def test_successful_login_and_access(self):
         # 1. Realizar login POST

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Iniciar sesión — Dashboard GS (N-Layer){% endblock %}
+{% block title %}{{ t('login_title') }}{% endblock %}
 
 {% block head %}
 <style>
@@ -22,6 +22,27 @@
     padding: 32px;
     width: 340px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .lang-switcher-login {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .lang-switcher-login a {
+    text-decoration: none;
+    color: #93a4b3;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .lang-switcher-login a.active {
+    color: #4da3ff;
+    background: rgba(77,163,255,0.15);
+    border: 1px solid #4da3ff;
   }
   .badge-arch {
     display: inline-block;
@@ -80,20 +101,32 @@
 
 {% block content %}
   <form class="box" method="post">
-    <span class="badge-arch">N-Layer Architecture</span>
-    <h1>Dashboard de Facturas y Costos GS</h1>
-    <p class="subtitle">Tecnologías de Construcción de Software</p>
+    <div class="lang-switcher-login" style="align-items: center; gap: 4px;">
+      <label for="loginLangSelect" style="font-size: 13px; margin: 0; cursor: pointer; color: #4da3ff;">🌐</label>
+      <select id="loginLangSelect" onchange="window.location.href='/set-lang/' + this.value"
+              style="background: #1c2b38; color: #e6edf3; border: 1px solid #2a3b4a; border-radius: 6px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer; outline: none;">
+        {% for lang in supported_languages %}
+          <option value="{{ lang.code }}" {% if current_lang == lang.code %}selected{% endif %}>
+            {{ lang.flag }} {{ lang.code|upper }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <span class="badge-arch">{{ t('tier_badge') }}</span>
+    <h1>{{ t('login_heading') }}</h1>
+    <p class="subtitle">{{ t('login_sub') }}</p>
 
     {% if error %}
       <div class="error">{{ error }}</div>
     {% endif %}
 
-    <label for="u">Usuario</label>
+    <label for="u">{{ t('username_label') }}</label>
     <input id="u" name="username" autofocus required>
     
-    <label for="p">Contraseña</label>
+    <label for="p">{{ t('password_label') }}</label>
     <input id="p" name="password" type="password" required>
     
-    <button type="submit">Iniciar Sesión</button>
+    <button type="submit">{{ t('login_submit') }}</button>
   </form>
 {% endblock %}

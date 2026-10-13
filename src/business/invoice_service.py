@@ -3,6 +3,9 @@
 Servicio de lógica de negocio para Facturas y Costos de Medicamentos.
 Implementa algoritmos de filtrado, búsqueda difusa, ordenamiento,
 cálculo de inconsistencias y orquestación de acceso a datos.
+
+Incluye funciones explícitas STATELESS (sin estado) y STATEFUL (con estado)
+para el curso de Tecnologías de Construcción de Software.
 """
 import re
 import unicodedata
@@ -14,20 +17,54 @@ from ..domain.dtos import InvoiceFilterDTO, PaginatedResultDTO
 from ..data_access.interfaces import IInvoiceRepository, IDocumentStorage
 
 
-def _strip_accents(s: Optional[str]) -> str:
-    if s is None:
+# ============================================================================
+# FUNCIONES STATELESS (SIN ESTADO / PURAS)
+# ============================================================================
+
+def normalize_product_name_stateless(raw_name: Optional[str]) -> str:
+    """
+    [STATELESS 1] Normalización determinista de nombres de productos/medicamentos.
+    
+    Características Stateless:
+    - Función pura: No depende ni modifica variables globales, archivos ni bases de datos.
+    - Determinismo: Para un mismo `raw_name`, siempre retorna el mismo string normalizado.
+    - Idempotencia y sin efectos secundarios (no side-effects).
+    """
+    if raw_name is None:
         return ""
-    return "".join(
-        c for c in unicodedata.normalize("NFKD", str(s)) if not unicodedata.combining(c)
+    # Quitar acentos mediante descomposición Unicode NFKD
+    text = "".join(
+        c for c in unicodedata.normalize("NFKD", str(raw_name))
+        if not unicodedata.combining(c)
     )
+    text = text.lower()
+    # Reemplazar caracteres no alfanuméricos por espacios
+    text = re.sub(r"[^a-z0-9%.,/\-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def _norm_text(s: Optional[str]) -> str:
-    """Normaliza texto para búsqueda: sin acentos, minúsculas, espacios simples."""
-    s = _strip_accents(s).lower()
-    s = re.sub(r"[^a-z0-9%.,/\-]+", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
+def calculate_unit_cost_stateless(importe_total: float, unidades_totales: float) -> Optional[float]:
+    """
+    [STATELESS 2] Cálculo matemático puro de costo por unidad.
+    
+    Características Stateless:
+    - No requiere memoria de ejecuciones pasadas ni estado de sesión.
+    - Valida reglas aritméticas (división entre cero, valores negativos) puramente a partir de sus parámetros.
+    - Retorna el costo redondeado a 4 decimales o None si los parámetros son inválidos.
+    """
+    try:
+        total = float(importe_total)
+        units = float(unidades_totales)
+        if units <= 0 or total < 0:
+            return None
+        return round(total / units, 4)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
 
+
+# ============================================================================
+# SERVICIO PRINCIPAL
+# ============================================================================
 
 class InvoiceService:
     """Servicio de aplicación para la gestión y consulta de facturas."""
@@ -35,6 +72,60 @@ class InvoiceService:
     def __init__(self, invoice_repo: IInvoiceRepository, doc_storage: IDocumentStorage):
         self.invoice_repo = invoice_repo
         self.doc_storage = doc_storage
+        
+        # [STATEFUL 1 - Almacén de estado]: Contador de visualizaciones en memoria
+        self._view_counter: Dict[int, int] = {}
+
+    # ========================================================================
+    # FUNCIONES STATEFUL (CON ESTADO)
+    # ========================================================================
+
+    def track_invoice_view_stateful(self, invoice_id: int) -> int:
+        """
+        [STATEFUL 1] Registro y conteo acumulativo de visualizaciones de facturas.
+        
+        Características Stateful:
+        - Modifica el estado interno persistido en memoria de la instancia (`self._view_counter`).
+        - El valor de retorno cambia en cada llamada sucesiva para el mismo `invoice_id` (1, 2, 3...).
+        - Mantiene métricas en tiempo de ejecución del sistema.
+        """
+        current_count = self._view_counter.get(invoice_id, 0) + 1
+        self._view_counter[invoice_id] = current_count
+        return current_count
+
+    def get_invoice_view_count(self, invoice_id: int) -> int:
+        """Consulta el estado actual de visualizaciones de una factura."""
+        return self._view_counter.get(invoice_id, 0)
+
+    @staticmethod
+    def add_search_history_stateful(session_store: Dict[str, Any], query: str, max_items: int = 5) -> List[str]:
+        """
+        [STATEFUL 2] Gestión del historial de búsquedas del usuario en la sesión.
+        
+        Características Stateful:
+        - Lee y muta el diccionario de sesión `session_store` que persiste entre peticiones HTTP.
+        - Mantiene una lista FIFO de las últimas búsquedas únicas realizadas por el usuario actual.
+        - El resultado devuelto depende de la secuencia cronológica previa de búsquedas.
+        """
+        if not query or not query.strip():
+            return session_store.get("search_history", [])
+
+        clean_q = query.strip()
+        history: List[str] = session_store.get("search_history", [])
+
+        # Evitar duplicados consecutivos y mantener orden reciente
+        if clean_q in history:
+            history.remove(clean_q)
+        history.insert(0, clean_q)
+
+        # Limitar al tamaño máximo
+        history = history[:max_items]
+        session_store["search_history"] = history
+        return history
+
+    # ========================================================================
+    # MÉTODOS DE NEGOCIO Y CONSULTA
+    # ========================================================================
 
     def get_providers(self) -> List[str]:
         """Obtiene lista ordenada de proveedores."""
@@ -64,14 +155,14 @@ class InvoiceService:
         all_invoices = self.invoice_repo.get_all()
         matched = all_invoices
 
-        # 1. Filtro por búsqueda de texto de medicamento
+        # 1. Filtro por búsqueda de texto de medicamento (usando función stateless)
         if filters.query:
-            query_norm = _norm_text(filters.query)
+            query_norm = normalize_product_name_stateless(filters.query)
             tokens = [t for t in query_norm.split() if t]
             if tokens:
                 matched = [
                     inv for inv in matched
-                    if all(t in _norm_text(inv.producto) for t in tokens)
+                    if all(t in normalize_product_name_stateless(inv.producto) for t in tokens)
                 ]
 
         # 2. Filtro por Proveedor
@@ -93,15 +184,15 @@ class InvoiceService:
 
         # 6. Filtro por Número de Documento
         if filters.documento:
-            doc_q = _norm_text(filters.documento)
-            matched = [inv for inv in matched if doc_q in _norm_text(inv.documento)]
+            doc_q = normalize_product_name_stateless(filters.documento)
+            matched = [inv for inv in matched if doc_q in normalize_product_name_stateless(inv.documento)]
 
         # 7. Filtro por Nombre de Archivo PDF
         if filters.archivo_pdf:
-            arc_q = _norm_text(filters.archivo_pdf)
+            arc_q = normalize_product_name_stateless(filters.archivo_pdf)
             matched = [
                 inv for inv in matched
-                if inv.pdf_rel and arc_q in _norm_text(inv.pdf_rel)
+                if inv.pdf_rel and arc_q in normalize_product_name_stateless(inv.pdf_rel)
             ]
 
         # 8. Filtro por Inconsistencias específicas

@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}Demostración de Funciones Stateful y Stateless — N-Layer{% endblock %}
+
+{% block head %}
+<style>
+  .demo-container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+  @media (max-width: 850px) { .grid-2 { grid-template-columns: 1fr; } }
+  .demo-card {
+    background: #16212c;
+    border: 1px solid #2a3b4a;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  .tag-stateless {
+    display: inline-block; background: rgba(52, 200, 138, 0.15); color: #34c88a;
+    border: 1px solid #34c88a; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .tag-stateful {
+    display: inline-block; background: rgba(77, 163, 255, 0.15); color: #4da3ff;
+    border: 1px solid #4da3ff; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .card-title { font-size: 16px; font-weight: 700; margin: 12px 0 6px; }
+  .card-desc { font-size: 13px; color: #93a4b3; margin-bottom: 16px; line-height: 1.5; }
+  .code-box {
+    background: #0d151e; border: 1px solid #233342; border-radius: 8px;
+    padding: 12px; font-family: "Consolas", monospace; font-size: 12px;
+    color: #e6edf3; overflow-x: auto; margin-bottom: 12px;
+  }
+  .exec-box {
+    background: #1c2b38; border-left: 3px solid #4da3ff; border-radius: 0 8px 8px 0;
+    padding: 12px; font-size: 13px; margin-top: 10px;
+  }
+  .exec-stateless { border-left-color: #34c88a; }
+  .chip-demo {
+    display: inline-block; background: #233342; border: 1px solid #4da3ff; color: #4da3ff;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; margin: 4px 4px 4px 0;
+  }
+  .btn-action {
+    background: #4da3ff; color: #04141f; font-weight: 700; border: none;
+    border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 13px;
+  }
+  .btn-action:hover { background: #3b8ce0; }
+  .btn-stateless { background: #34c88a; }
+  .btn-stateless:hover { background: #2ab379; }
+  .live-badge {
+    font-size: 18px; font-weight: bold; color: #34c88a; display: inline-block;
+    padding: 4px 12px; background: rgba(52,200,138,0.15); border-radius: 8px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<header>
+  <div style="display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto; width: 100%;">
+    <div>
+      <h1 style="font-size: 20px; margin: 0;">Evidencia: 2 Funciones Stateful y 2 Funciones Stateless</h1>
+      <span class="sub">Curso: Tecnologías de Construcción de Software — Arquitectura en Capas</span>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <!-- Menú Desplegable de Selección de Idioma (i18n) -->
+      <div style="display: flex; align-items: center; gap: 6px; background: #16212c; border: 1px solid #2a3b4a; border-radius: 8px; padding: 4px 8px;">
+        <label for="demoLangSelect" style="font-size: 13px; color: #4da3ff; margin: 0; cursor: pointer;">🌐</label>
+        <select id="demoLangSelect" onchange="window.location.href='/set-lang/' + this.value" 
+                style="background: #1c2b38; color: #e6edf3; border: 1px solid #3d5166; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; outline: none;">
+          {% for lang in supported_languages %}
+            <option value="{{ lang.code }}" {% if current_lang == lang.code %}selected{% endif %}>
+              {{ lang.flag }} {{ lang.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <a href="{{ url_for('views.dashboard') }}" style="background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600;">← Ir al Dashboard</a>
+      <a href="{{ url_for('auth.logout') }}" style="border: 1px solid #f0616d; color: #f0616d; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600;">Cerrar sesión</a>
+    </div>
+  </div>
+</header>
+
+<div class="demo-container">
+
+  <!-- RESUMEN TEÓRICO -->
+  <div style="background: #16212c; border: 1px solid #2a3b4a; border-radius: 12px; padding: 18px 24px; margin-bottom: 20px;">
+    <h2 style="font-size: 16px; margin: 0 0 8px; color: #e6edf3;">Fundamentos en Tecnologías de Construcción de Software</h2>
+    <p style="font-size: 13px; color: #93a4b3; margin: 0; line-height: 1.6;">
+      • <strong>Funciones Stateless (Sin Estado / Puras):</strong> No dependen ni mutan ningún estado fuera de su alcance. Dado un mismo input, siempre devuelven exactamente el mismo output determinista sin efectos secundarios.<br>
+      • <strong>Funciones Stateful (Con Estado):</strong> Modifican o dependen de un estado interno persistido (en memoria del servicio o en la sesión HTTP). Sus resultados cambian en cada invocación sucesiva reflejando el historial acumulado.
+    </p>
+  </div>
+
+  <div class="grid-2">
+
+    <!-- 1. STATELESS 1 -->
+    <div class="demo-card">
+      <span class="tag-stateless">Stateless 1 • Función Pura</span>
+      <h3 class="card-title"><code>normalize_product_name_stateless()</code></h3>
+      <p class="card-desc">
+        Normaliza y sanitiza nombres de medicamentos eliminando tildes (NFKD), caracteres especiales y normalizando espacios de forma determinista.
+      </p>
+      <div class="code-box">
+def normalize_product_name_stateless(raw_name: str) -> str:
+    text = unicodedata.normalize("NFKD", str(raw_name))
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9%.,/\-]+", " ", text.lower()).strip()
+      </div>
+      <div class="exec-box exec-stateless">
+        <strong>Prueba de ejecución en vivo:</strong>
+        <div style="margin-top: 6px;"><strong>Input:</strong> <code>"  PARACETAMOL 500 mg (Caja x 100 Tab.) / Genérico  "</code></div>
+        <div style="margin-top: 4px; color: #34c88a;"><strong>Output:</strong> <code>"paracetamol 500 mg caja x 100 tab. / generico"</code></div>
+        <div style="margin-top: 6px; font-size: 12px; color: #93a4b3;">
+          ✓ Idempotencia: Invocada 100 veces con la misma entrada produce exactamente el mismo resultado sin tocar variables de sesión ni memoria.
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. STATELESS 2 -->
+    <div class="demo-card">
+      <span class="tag-stateless">Stateless 2 • Función Pura</span>
+      <h3 class="card-title"><code>calculate_unit_cost_stateless()</code></h3>
+      <p class="card-desc">
+        Calcula matemáticamente el costo por unidad (Importe Total / Unidades Totales) protegiendo contra divisiones por cero sin alterar ningún estado.
+      </p>
+      <div class="code-box">
+def calculate_unit_cost_stateless(importe_total, unidades_totales):
+    if unidades_totales <= 0 or importe_total < 0:
+        return None
+    return round(float(importe_total) / float(unidades_totales), 4)
+      </div>
+      <div class="exec-box exec-stateless">
+        <strong>Pruebas de ejecución en vivo:</strong>
+        <div style="margin-top: 6px;">• <code>calc(150.0, 10.0)</code> &nbsp;➔&nbsp; <strong style="color: #34c88a;">S/ 15.0000</strong> (Cálculo directo)</div>
+        <div style="margin-top: 4px;">• <code>calc(100.0, 3.0)</code> &nbsp;&nbsp;➔&nbsp; <strong style="color: #34c88a;">S/ 33.3333</strong> (Precisión decimal)</div>
+        <div style="margin-top: 4px;">• <code>calc(100.0, 0.0)</code> &nbsp;&nbsp;➔&nbsp; <span style="color: #e8b339;">None</span> (Control seguro división entre cero)</div>
+        <div style="margin-top: 6px; font-size: 12px; color: #93a4b3;">
+          ✓ Función transparente referencialmente (sin efectos colaterales).
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. STATEFUL 1 -->
+    <div class="demo-card">
+      <span class="tag-stateful">Stateful 1 • Memoria de Servicio</span>
+      <h3 class="card-title"><code>track_invoice_view_stateful()</code></h3>
+      <p class="card-desc">
+        Registra y acumula el contador de visualizaciones de cada factura en el diccionario interno <code>self._view_counter</code> del servicio.
+      </p>
+      <div class="code-box">
+def track_invoice_view_stateful(self, invoice_id: int) -> int:
+    current_count = self._view_counter.get(invoice_id, 0) + 1
+    self._view_counter[invoice_id] = current_count
+    return current_count
+      </div>
+      <div class="exec-box">
+        <strong>Estado en memoria (Factura ID #42):</strong>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px;">
+          <div>
+            <span>Vistas acumuladas: </span>
+            <span class="live-badge" id="viewCounterBadge">{{ invoice_views }} vista(s)</span>
+          </div>
+          <button class="btn-action" id="btnIncrementView">Simular Vista (+1)</button>
+        </div>
+        <div style="margin-top: 8px; font-size: 12px; color: #93a4b3;" id="viewCounterLog">
+          Estado mutable: Cada clic incrementa el estado interno en memoria del servicio.
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. STATEFUL 2 -->
+    <div class="demo-card">
+      <span class="tag-stateful">Stateful 2 • Sesión HTTP</span>
+      <h3 class="card-title"><code>add_search_history_stateful()</code></h3>
+      <p class="card-desc">
+        Modifica cronológicamente el historial de consultas del usuario almacenado en la sesión HTTP (<code>session['search_history']</code>).
+      </p>
+      <div class="code-box">
+def add_search_history_stateful(session_store, query, max_items=5):
+    history = session_store.get("search_history", [])
+    if query in history: history.remove(query)
+    history.insert(0, query)
+    session_store["search_history"] = history[:max_items]
+    return session_store["search_history"]
+      </div>
+      <div class="exec-box">
+        <strong>Historial en la Sesión del Usuario:</strong>
+        <div style="margin: 10px 0;" id="historyChipsContainer">
+          {% if search_history %}
+            {% for q in search_history %}
+              <span class="chip-demo">🕒 {{ q }}</span>
+            {% endfor %}
+          {% else %}
+            <span style="color: #93a4b3; font-size: 12px;">Sin búsquedas recientes registradas aún.</span>
+          {% endif %}
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <input id="txtDemoSearch" type="text" placeholder="Ej: cardivas, paracetamol..." style="padding: 6px 10px; font-size: 13px; border-radius: 6px; border: 1px solid #2a3b4a; background: #0d151e; color: #e6edf3; flex: 1;">
+          <button class="btn-action" id="btnAddSearch">Agregar a Sesión</button>
+        </div>
+        <div style="margin-top: 8px; font-size: 12px; color: #93a4b3;">
+          Estado de sesión: Almacena secuencialmente las consultas entre diferentes peticiones HTTP.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let invoiceId = 42;
+
+  document.getElementById("btnIncrementView").addEventListener("click", async () => {
+    try {
+      const res = await fetch("/api/stateful/track-view/" + invoiceId, { method: "POST" });
+      const data = await res.json();
+      document.getElementById("viewCounterBadge").textContent = data.total_views + " vista(s)";
+      document.getElementById("viewCounterLog").textContent = 
+        "✓ Estado actualizado en memoria: Factura #" + invoiceId + " ahora tiene " + data.total_views + " vistas.";
+    } catch(e) {
+      console.error(e);
+    }
+  });
+
+  document.getElementById("btnAddSearch").addEventListener("click", async () => {
+    const txt = document.getElementById("txtDemoSearch").value.trim();
+    if (!txt) return;
+    try {
+      const res = await fetch("/api/stateful/search-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: txt })
+      });
+      const data = await res.json();
+      const container = document.getElementById("historyChipsContainer");
+      container.innerHTML = data.search_history.map(q => `<span class="chip-demo">🕒 ${q}</span>`).join(" ");
+      document.getElementById("txtDemoSearch").value = "";
+    } catch(e) {
+      console.error(e);
+    }
+  });
+</script>
+{% endblock %}

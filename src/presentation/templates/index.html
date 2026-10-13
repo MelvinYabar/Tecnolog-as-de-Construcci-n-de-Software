@@ -1,19 +1,48 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard de Facturas y Costos — Arquitectura N-Capas{% endblock %}
+{% block title %}{{ t('app_title') }} — {{ t('tier_badge') }}{% endblock %}
 
 {% block content %}
 <header>
-  <div style="display: flex; justify-content: space-between; align-items: center;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
     <div>
-      <h1>Dashboard de Facturas y Costos de Medicamentos</h1>
-      <span class="sub" id="sourceInfo">Cargando datos desde la Capa de Negocio...</span>
+      <h1>{{ t('app_title') }}</h1>
+      <span class="sub" id="sourceInfo">{{ t('loading_data') }}</span>
     </div>
-    <div style="display: flex; align-items: center; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      
+      <!-- Ticker en Vivo de Tasas de Cambio (Servicio Externo) -->
+      <div id="extRateTicker" style="display: flex; align-items: center; gap: 6px; background: #16212c; border: 1px solid #2a3b4a; border-radius: 8px; padding: 4px 10px; font-size: 11px;">
+        <span style="color:#8c9ba8;">⏳ Cargando tasas externas...</span>
+      </div>
+
+      <!-- Selector de Idioma (i18n) -->
+      <div style="display: flex; align-items: center; gap: 6px; background: #16212c; border: 1px solid #2a3b4a; border-radius: 8px; padding: 4px 8px;">
+        <label for="langSelect" style="font-size: 13px; color: #4da3ff; margin: 0; cursor: pointer;">🌐</label>
+        <select id="langSelect" onchange="window.location.href='/set-lang/' + this.value" 
+                style="background: #1c2b38; color: #e6edf3; border: 1px solid #3d5166; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; outline: none;">
+          {% for lang in supported_languages %}
+            <option value="{{ lang.code }}" {% if current_lang == lang.code %}selected{% endif %}>
+              {{ lang.flag }} {{ lang.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="button" id="btnOpenDiagramModal" style="background: rgba(77, 163, 255, 0.15); border: 1px solid #4da3ff; color: #4da3ff; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">
+        {{ t('btn_view_component_diagram') }}
+      </button>
+      <a href="#panelExternalService" style="background: rgba(52, 200, 138, 0.15); border: 1px solid #34c88a; color: #34c88a; padding: 5px 12px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 700;">
+        {{ t('btn_toggle_external_service') }}
+      </a>
+      <a href="#panelRegex" style="background: rgba(232, 179, 57, 0.15); border: 1px solid #e8b339; color: #e8b339; padding: 5px 12px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 700;">
+        {{ t('btn_toggle_regex_form') }}
+      </a>
+      <a href="{{ url_for('views.demo_funciones') }}" style="background: rgba(52, 200, 138, 0.2); border: 1px solid #34c88a; color: #34c88a; padding: 5px 12px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 700;">{{ t('view_functions_btn') }}</a>
       <span style="background: #1c2b38; padding: 4px 10px; border-radius: 6px; font-size: 12px; border: 1px solid #2a3b4a; color: #4da3ff;">
-        Arquitectura N-Capas (4-Tier)
+        {{ t('tier_badge') }}
       </span>
-      <a href="{{ url_for('auth.logout') }}" style="color: #f0616d; text-decoration: none; font-size: 13px; font-weight: bold; padding: 6px 12px; border: 1px solid #f0616d; border-radius: 6px;">Cerrar sesión</a>
+      <a href="{{ url_for('auth.logout') }}" style="color: #f0616d; text-decoration: none; font-size: 13px; font-weight: bold; padding: 6px 12px; border: 1px solid #f0616d; border-radius: 6px;">{{ t('logout_btn') }}</a>
     </div>
   </div>
 </header>
@@ -22,83 +51,423 @@
 
   <div class="cards" id="cards"></div>
 
-  <div class="panel">
-    <h2>Buscar medicamento</h2>
-    <div class="filters">
-      <div class="full">
-        <label for="qMed">Nombre, parte del nombre, principio activo o concentración</label>
-        <input id="qMed" type="text" placeholder="Ej: paracetamol, amoxicilina 500, cardivas 12.5...">
-      </div>
+  <!-- Centro de colaboración WebSocket en tiempo real -->
+  <section class="panel live-center" id="panelWebSocket" aria-labelledby="liveCenterTitle">
+    <div class="live-header">
       <div>
-        <label for="fFechaDesde">Fecha desde</label>
-        <input id="fFechaDesde" type="date">
+        <div class="live-title-row">
+          <span class="live-pulse" aria-hidden="true"></span>
+          <h2 id="liveCenterTitle">Centro de auditoría en vivo</h2>
+          <span class="live-protocol">WebSocket · Full duplex</span>
+        </div>
+        <p>Comparte hallazgos sobre facturas al instante con todos los auditores conectados.</p>
       </div>
-      <div>
-        <label for="fFechaHasta">Fecha hasta</label>
-        <input id="fFechaHasta" type="date">
-      </div>
-      <div>
-        <label for="fProveedor">Proveedor</label>
-        <select id="fProveedor"><option value="">Todos</option></select>
-      </div>
-      <div>
-        <label for="fEstado">Estado del PDF</label>
-        <select id="fEstado">
-          <option value="">Todos</option>
-          <option value="encontrado">PDF encontrado</option>
-          <option value="no_encontrado">PDF no encontrado</option>
-          <option value="posible">Posible coincidencia</option>
-          <option value="vacio">Sin número de documento</option>
-        </select>
-      </div>
-      <div>
-        <label for="fDocumento">Número de factura</label>
-        <input id="fDocumento" type="text" placeholder="Ej: F002-00012780">
-      </div>
-      <div>
-        <label for="fArchivo">Nombre de archivo PDF</label>
-        <input id="fArchivo" type="text" placeholder="Ej: F002-00012780 08.06.pdf">
+      <div class="live-presence">
+        <span id="wsStatus" class="ws-status connecting">Conectando…</span>
+        <strong id="wsAudience">0 auditores en línea</strong>
+        <span id="wsLatency">Latencia: —</span>
       </div>
     </div>
-    <div class="row-actions">
-      <button class="primary" id="btnBuscar">Buscar</button>
-      <button class="ghost" id="btnLimpiar">Limpiar filtros</button>
-      <button class="ghost" id="btnSoloProblemas">Ver solo registros con problemas de PDF</button>
+
+    <div class="live-layout">
+      <form id="wsNoteForm" class="live-compose">
+        <label for="wsInvoice">Factura relacionada</label>
+        <input id="wsInvoice" name="invoice" value="F001-00012780" maxlength="30" required>
+        <label for="wsNote">Nota colaborativa</label>
+        <textarea id="wsNote" name="note" maxlength="240" required
+                  placeholder="Ej.: Verificar diferencia entre costo unitario y orden de compra."></textarea>
+        <div class="live-actions">
+          <select id="wsNoteStatus" aria-label="Estado de revisión">
+            <option value="EN_REVISION">En revisión</option>
+            <option value="OBSERVADO">Observado</option>
+            <option value="RESUELTO">Resuelto</option>
+          </select>
+          <button id="wsSendNote" type="submit" class="primary">Transmitir nota</button>
+        </div>
+        <small>La nota se envía por <code>wss://</code> en producción, sin recargar la página.</small>
+      </form>
+
+      <div class="live-feed-wrap">
+        <div class="live-feed-heading">
+          <strong>Actividad en tiempo real</strong>
+          <span id="wsEventCount">0 eventos</span>
+        </div>
+        <div id="wsFeed" class="live-feed" role="log" aria-live="polite">
+          <div class="live-empty">Esperando conexión con el servidor…</div>
+        </div>
+      </div>
     </div>
-    <div id="fuzzyBox"></div>
+  </section>
+
+  <!-- Panel de Consumo de Servicio Externo en Tiempo Real (ExchangeRate-API & OpenFDA) -->
+  <div class="panel" id="panelExternalService" style="border: 1px solid #238636; background: #111e17; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid #1f4228; padding-bottom: 14px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <h2 style="margin: 0; font-size: 18px; color: #e6edf3;">🌐 {{ t('ext_service_title') }}</h2>
+          <span style="background: rgba(52,200,138,0.18); color: #34c88a; border: 1px solid #34c88a; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">
+            Client-Side REST Service
+          </span>
+        </div>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #93a4b3;">{{ t('ext_service_sub') }}</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span id="extStatusBadge" style="font-size: 12px; font-weight: bold; color: #34c88a;">🟢 Conectando con open.er-api.com...</span>
+        <span id="extLatencyBadge" class="badge ok" style="display: none; font-size: 11px;"></span>
+        <button type="button" id="btnRefreshRates" class="primary" style="background: #34c88a; color: #04141f; padding: 6px 14px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer;">
+          {{ t('ext_btn_refresh') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Grid de Funcionalidades del Servicio Externo -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+      
+      <!-- Bloque 1: Conversión de Divisas en Vivo -->
+      <div style="background: #14231b; border: 1px solid #234b32; border-radius: 8px; padding: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="margin: 0; font-size: 14px; color: #34c88a;">💱 {{ t('ext_calc_title') }}</h3>
+          <span id="extTimeSpan" style="font-size: 11px; color: #8c9ba8;"></span>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label for="selectCurrency" style="display: block; font-size: 12px; font-weight: 600; color: #e6edf3; margin-bottom: 6px;">
+            {{ t('ext_currency_label') }}
+          </label>
+          <select id="selectCurrency" style="width: 100%; background: #1c2b38; color: #4da3ff; font-weight: bold; border: 1px solid #4da3ff; border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer;">
+            <option value="PEN" selected>🇵🇪 Soles Peruanos (PEN S/) — Moneda Base</option>
+            <option value="USD">🇺🇸 Dólares Americanos (USD $) — Tasa en vivo</option>
+            <option value="EUR">🇪🇺 Euros (EUR €) — Tasa en vivo</option>
+            <option value="BRL">🇧🇷 Reales Brasileños (BRL R$) — Tasa en vivo</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="extCalcInput" style="display: block; font-size: 12px; color: #8c9ba8; margin-bottom: 4px;">Simular Monto en Soles (PEN):</label>
+          <input id="extCalcInput" type="number" value="100" min="0" step="10" style="width: 100%; box-sizing: border-box; background: #0f1720; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-size: 13px; font-weight: bold;">
+          <div style="display: flex; justify-content: space-between; margin-top: 10px; background: #0f1720; padding: 10px; border-radius: 6px; border: 1px solid #1c2b38;">
+            <div style="text-align: center;"><div style="font-size: 11px; color: #8c9ba8;">USD ($)</div><div id="extCalcResUSD" style="color: #34c88a; font-weight: bold; font-size: 14px;">$ 0.00</div></div>
+            <div style="text-align: center;"><div style="font-size: 11px; color: #8c9ba8;">EUR (€)</div><div id="extCalcResEUR" style="color: #4da3ff; font-weight: bold; font-size: 14px;">€ 0.00</div></div>
+            <div style="text-align: center;"><div style="font-size: 11px; color: #8c9ba8;">BRL (R$)</div><div id="extCalcResBRL" style="color: #e8b339; font-weight: bold; font-size: 14px;">R$ 0.00</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bloque 2: Consulta Farmacológica OpenFDA -->
+      <div style="background: #14231b; border: 1px solid #234b32; border-radius: 8px; padding: 16px;">
+        <h3 style="margin: 0 0 8px; font-size: 14px; color: #34c88a;">💊 Consulta Farmacológica en OpenFDA (EE.UU.)</h3>
+        <p style="font-size: 12px; color: #8c9ba8; margin: 0 0 12px;">Consulta el principio activo oficial y advertencias de la FDA directamente desde el navegador:</p>
+        <div style="display: flex; gap: 8px;">
+          <input id="extFdaInput" type="text" placeholder="Ej: Paracetamol, Amoxicilina, Ibuprofeno..." value="Paracetamol" style="flex: 1; background: #0f1720; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-size: 13px;">
+          <button type="button" id="btnLookupFDA" class="ghost" style="border-color: #34c88a; color: #34c88a; font-size: 12px; font-weight: 600; white-space: nowrap;">
+            {{ t('ext_fda_lookup_btn') }}
+          </button>
+        </div>
+        <div id="extFdaResultBox" style="margin-top: 10px;"></div>
+      </div>
+
+    </div>
+
+    <!-- Visualizador de Payload JSON en Vivo de la API Externa -->
+    <div style="margin-top: 16px; background: #09120c; border: 1px solid #183523; border-radius: 8px; padding: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; color: #8c9ba8;">
+        <span>{{ t('ext_json_viewer_title') }} <code style="color:#34c88a;">GET https://open.er-api.com/v6/latest/PEN</code></span>
+        <span style="color:#34c88a; font-size: 11px;">Direct Browser Fetch (CORS Enabled)</span>
+      </div>
+      <pre id="extJsonPre" style="margin: 0; font-family: 'Consolas', monospace; font-size: 11.5px; color: #34c88a; max-height: 180px; overflow-y: auto; white-space: pre-wrap;"></pre>
+    </div>
+  </div>
+
+  <!-- Modal del Diagrama de Componentes UML -->
+  <div id="modalDiagram" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; overflow-y: auto; padding: 24px; box-sizing: border-box;">
+    <div style="max-width: 1100px; margin: 20px auto; background: #141e28; border: 1px solid #2a3b4a; border-radius: 12px; padding: 24px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); position: relative;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #243545; padding-bottom: 14px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h2 style="margin: 0; font-size: 18px; color: #e6edf3;">📐 {{ t('modal_diagram_title') }}</h2>
+          <span style="background: rgba(77,163,255,0.18); color: #4da3ff; border: 1px solid #4da3ff; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold;">UML 2.5</span>
+        </div>
+        <button type="button" id="btnCloseDiagramModal" style="background: #233342; border: 1px solid #3d5166; color: #e6edf3; font-size: 14px; padding: 6px 12px; border-radius: 6px; cursor: pointer;">✕ Cerrar</button>
+      </div>
+
+      <div style="background: #0f1720; border: 1px solid #233342; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <h4 style="margin: 0 0 8px; color: #4da3ff; font-size: 14px;">Estructura de Componentes por Capa y Dependencias:</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; font-size: 12px;">
+          <div style="background: #16212c; border: 1px solid #2a3b4a; border-radius: 6px; padding: 10px;">
+            <strong style="color: #34c88a;">1. Servicios Externos</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #8c9ba8;">
+              <li>ExchangeRate-API (Divisas)</li>
+              <li>OpenFDA API (Fármacos)</li>
+            </ul>
+          </div>
+          <div style="background: #16212c; border: 1px solid #2a3b4a; border-radius: 6px; padding: 10px;">
+            <strong style="color: #4da3ff;">2. Capa de Presentación</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #8c9ba8;">
+              <li>DashboardView (Jinja2)</li>
+              <li>AppController (app.js)</li>
+              <li>ExternalServiceController</li>
+              <li>RegexValidatorController</li>
+              <li>Flask Blueprints (/api/*)</li>
+            </ul>
+          </div>
+          <div style="background: #16212c; border: 1px solid #2a3b4a; border-radius: 6px; padding: 10px;">
+            <strong style="color: #e8b339;">3. Capa de Negocio</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #8c9ba8;">
+              <li>InvoiceService</li>
+              <li>RegexValidatorService</li>
+              <li>AuthService</li>
+              <li>AuditService</li>
+              <li>I18nService</li>
+            </ul>
+          </div>
+          <div style="background: #16212c; border: 1px solid #2a3b4a; border-radius: 6px; padding: 10px;">
+            <strong style="color: #f0616d;">4. Capa de Acceso a Datos</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px; color: #8c9ba8;">
+              <li>ExcelInvoiceRepository</li>
+              <li>JsonAuditRepository</li>
+              <li>DocumentStorage (PDFs)</li>
+              <li>Contratos (Interfaces)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align: right; margin-top: 12px;">
+        <span style="font-size: 12px; color: #8c9ba8;">Documentación completa y matriz de interfaces: </span>
+        <code style="color: #4da3ff; background: #0f1720; padding: 2px 6px; border-radius: 4px;">docs/DIAGRAMA_COMPONENTES.md</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel de Validación de Formularios mediante Expresiones Regulares (Regex) -->
+  <div class="panel" id="panelRegex" style="border: 1px solid #3d5166; background: #141e28; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.35);">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid #243545; padding-bottom: 14px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h2 style="margin: 0; font-size: 18px; color: #e6edf3;">📋 {{ t('regex_form_title') }}</h2>
+          <span style="background: rgba(77,163,255,0.18); color: #4da3ff; border: 1px solid #4da3ff; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">
+            Regex N-Layer Validation
+          </span>
+        </div>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #93a4b3;">{{ t('regex_form_sub') }}</p>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button type="button" id="btnFillValid" class="ghost" style="border-color: #34c88a; color: #34c88a; font-size: 12px; font-weight: 600;">
+          ✔ {{ t('regex_btn_fill_valid') }}
+        </button>
+        <button type="button" id="btnFillInvalid" class="ghost" style="border-color: #f0616d; color: #f0616d; font-size: 12px; font-weight: 600;">
+          ✖ {{ t('regex_btn_fill_invalid') }}
+        </button>
+        <button type="button" id="btnClearRegex" class="ghost" style="font-size: 12px;">
+          🧹 Limpiar
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="regexAlertBox" style="display: none; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 16px;"></div>
+
+    <form id="regexForm" onsubmit="return false;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+        
+        <!-- 1. Número de Factura -->
+        <div class="regex-field-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_invoice_number" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_invoice') }}</label>
+            <span id="badge_invoice_number" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_invoice_number" name="invoice_number" type="text" placeholder="Ej: F002-00012780"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^[A-Z0-9]{1,5}-\d{4,8}$</code></span>
+            <span id="err_invoice_number" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+        <!-- 2. RUC Proveedor -->
+        <div class="regex-field-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_ruc" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_ruc') }}</label>
+            <span id="badge_ruc" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_ruc" name="ruc" type="text" placeholder="Ej: 20100123456"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^(10|20)\d{9}$</code></span>
+            <span id="err_ruc" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+        <!-- 3. Registro Sanitario -->
+        <div class="regex-field-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_sanitary_reg" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_sanitary') }}</label>
+            <span id="badge_sanitary_reg" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_sanitary_reg" name="sanitary_reg" type="text" placeholder="Ej: EE-04821"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^[A-Z]{1,3}-\d{4,8}$</code></span>
+            <span id="err_sanitary_reg" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+        <!-- 4. Fecha de Emisión -->
+        <div class="regex-field-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_invoice_date" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_date') }}</label>
+            <span id="badge_invoice_date" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_invoice_date" name="invoice_date" type="text" placeholder="AAAA-MM-DD (Ej: 2026-06-15)"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$</code></span>
+            <span id="err_invoice_date" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+        <!-- 5. Correo Electrónico -->
+        <div class="regex-field-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_contact_email" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_email') }}</label>
+            <span id="badge_contact_email" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_contact_email" name="contact_email" type="text" placeholder="Ej: auditoria@farmacia.com"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$</code></span>
+            <span id="err_contact_email" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+        <!-- 6. Importe Total -->
+        <div class="regex-field-group">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_total_amount" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_amount') }}</label>
+            <span id="badge_total_amount" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_total_amount" name="total_amount" type="text" placeholder="Ej: 12450.75"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^\d+(\.\d{1,4})?$</code></span>
+            <span id="err_total_amount" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+        <!-- 7. Archivo PDF -->
+        <div class="regex-field-group" style="grid-column: 1 / -1;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="rx_pdf_filename" style="font-size: 13px; font-weight: 600; color: #e6edf3;">{{ t('regex_field_pdf') }}</label>
+            <span id="badge_pdf_filename" class="badge" style="font-size: 11px; display: none;"></span>
+          </div>
+          <input id="rx_pdf_filename" name="pdf_filename" type="text" placeholder="Ej: F002-00012780 08.06.pdf"
+                 style="width: 100%; box-sizing: border-box; background: #1c2b38; border: 1px solid #2a3b4a; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span style="font-size: 11px; color: #8c9ba8;">Regex: <code style="color: #4da3ff; background: #0f1720; padding: 1px 4px; border-radius: 3px;">^[\w\s.-]+\.(pdf|PDF)$</code></span>
+            <span id="err_pdf_filename" style="font-size: 11px; color: #f0616d;"></span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Action Bar & Server Validation Response -->
+      <div style="margin-top: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <button type="button" id="btnSubmitRegex" class="primary" style="padding: 10px 22px; font-size: 14px; font-weight: 700; background: #4da3ff; color: #04141f; border-radius: 8px; cursor: pointer;">
+          🚀 {{ t('regex_btn_validate') }}
+        </button>
+        <span id="regexLayerBadge" style="font-size: 12px; color: #93a4b3; background: #1c2b38; border: 1px solid #2a3b4a; padding: 6px 12px; border-radius: 6px;">
+          Capa de Ejecución: <strong style="color: #4da3ff;">Business Layer</strong> &rarr; <code style="color:#e6edf3;">RegexValidatorService.validate_invoice_form()</code>
+        </span>
+      </div>
+
+      <!-- Server JSON response box -->
+      <div id="regexServerOutput" style="display: none; margin-top: 14px; background: #0d151e; border: 1px solid #233342; border-radius: 8px; padding: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; color: #8c9ba8;">
+          <span>Respuesta JSON del Servidor (POST <code>/api/invoices/validate-form</code>):</span>
+          <span id="serverStatusBadge" style="font-weight: bold;"></span>
+        </div>
+        <pre id="regexJsonPre" style="margin: 0; font-family: 'Consolas', monospace; font-size: 12px; color: #34c88a; overflow-x: auto; white-space: pre-wrap;"></pre>
+      </div>
+    </form>
   </div>
 
   <div class="panel">
-    <h2>Resultados</h2>
+    <h2>{{ t('filter_title') }}</h2>
+    <div class="filters">
+      <div class="full">
+        <label for="qMed">{{ t('filter_query_label') }}</label>
+        <input id="qMed" type="text" placeholder="{{ t('filter_query_placeholder') }}">
+      </div>
+      <div>
+        <label for="fFechaDesde">{{ t('filter_date_from') }}</label>
+        <input id="fFechaDesde" type="date">
+      </div>
+      <div>
+        <label for="fFechaHasta">{{ t('filter_date_to') }}</label>
+        <input id="fFechaHasta" type="date">
+      </div>
+      <div>
+        <label for="fProveedor">{{ t('filter_provider') }}</label>
+        <select id="fProveedor"><option value="">{{ t('filter_all') }}</option></select>
+      </div>
+      <div>
+        <label for="fEstado">{{ t('filter_pdf_status') }}</label>
+        <select id="fEstado">
+          <option value="">{{ t('filter_all') }}</option>
+          <option value="encontrado">{{ t('filter_status_found') }}</option>
+          <option value="no_encontrado">{{ t('filter_status_missing') }}</option>
+          <option value="posible">{{ t('filter_status_possible') }}</option>
+          <option value="vacio">{{ t('filter_status_empty') }}</option>
+        </select>
+      </div>
+      <div>
+        <label for="fDocumento">{{ t('filter_doc_number') }}</label>
+        <input id="fDocumento" type="text" placeholder="{{ t('filter_doc_placeholder') }}">
+      </div>
+      <div>
+        <label for="fArchivo">{{ t('filter_pdf_file') }}</label>
+        <input id="fArchivo" type="text" placeholder="{{ t('filter_pdf_placeholder') }}">
+      </div>
+    </div>
+    <div class="row-actions">
+      <button class="primary" id="btnBuscar">{{ t('btn_search') }}</button>
+      <button class="ghost" id="btnLimpiar">{{ t('btn_clear') }}</button>
+      <button class="ghost" id="btnSoloProblemas">{{ t('btn_only_issues') }}</button>
+    </div>
+    <div id="fuzzyBox"></div>
+    <div id="historyBox" style="margin-top: 8px;"></div>
+  </div>
+
+  <div class="panel">
+    <h2>{{ t('results_title') }}</h2>
     <div class="result-meta" id="resultMeta"></div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th data-k="fecha">Fecha</th>
-            <th data-k="proveedor">Proveedor</th>
-            <th data-k="documento">N° factura</th>
-            <th data-k="producto">Medicamento</th>
-            <th data-k="cantidad">Cant.</th>
-            <th data-k="um">U.M.</th>
-            <th data-k="precio_unitario">Precio unit.</th>
-            <th data-k="importe_total">Importe total</th>
-            <th data-k="costo_unidad">Costo/unidad</th>
-            <th data-k="pdf_status">Estado PDF</th>
+            <th data-k="fecha">{{ t('th_date') }}</th>
+            <th data-k="proveedor">{{ t('th_provider') }}</th>
+            <th data-k="documento">{{ t('th_invoice_no') }}</th>
+            <th data-k="producto">{{ t('th_medicine') }}</th>
+            <th data-k="cantidad">{{ t('th_qty') }}</th>
+            <th data-k="um">{{ t('th_unit') }}</th>
+            <th data-k="precio_unitario">{{ t('th_unit_price') }}</th>
+            <th data-k="importe_total">{{ t('th_total_amount') }}</th>
+            <th data-k="costo_unidad">{{ t('th_unit_cost') }}</th>
+            <th data-k="pdf_status">{{ t('th_pdf_status') }}</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
     <div class="pager">
-      <button class="small" id="btnPrev">‹ Anterior</button>
+      <button class="small" id="btnPrev">{{ t('btn_prev') }}</button>
       <span id="pagerInfo"></span>
-      <button class="small" id="btnNext">Siguiente ›</button>
+      <button class="small" id="btnNext">{{ t('btn_next') }}</button>
     </div>
   </div>
 
   <div class="panel" id="detailPanel" style="display:none;">
-    <h2>Detalle del registro seleccionado</h2>
+    <h2>{{ t('detail_title') }}</h2>
     <div class="detail-grid">
       <div>
         <div class="kv" id="detailKv"></div>
@@ -106,7 +475,7 @@
       </div>
       <div>
         <div class="pdf-frame-wrap" id="pdfFrameWrap">
-          <div class="pdf-empty">Seleccione un registro para previsualizar su PDF.</div>
+          <div class="pdf-empty">{{ t('detail_empty_selection') }}</div>
         </div>
         <div class="hint" id="pdfHint"></div>
       </div>
@@ -114,14 +483,43 @@
   </div>
 
   <div class="panel">
-    <h2>Reporte de inconsistencias</h2>
+    <h2>{{ t('incons_title') }}</h2>
     <div class="inconsistency-list" id="inconsList"></div>
-    <div class="hint">Haga clic en un indicador para filtrar la tabla con esos registros.</div>
+    <div class="hint">{{ t('incons_hint') }}</div>
   </div>
 
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script>
+  window.CURRENT_LANG = "{{ current_lang }}";
+  window.I18N = {{ i18n_bundle | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/external-service.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/regex-validator.js') }}"></script>
+<script src="{{ url_for('static', filename='js/websocket-audit.js') }}"></script>
+<script>
+  // Control de apertura y cierre del Modal de Diagrama de Componentes
+  document.addEventListener("DOMContentLoaded", function () {
+    const btnOpen = document.getElementById("btnOpenDiagramModal");
+    const btnClose = document.getElementById("btnCloseDiagramModal");
+    const modal = document.getElementById("modalDiagram");
+
+    if (btnOpen && modal) {
+      btnOpen.addEventListener("click", () => {
+        modal.style.display = "block";
+      });
+    }
+    if (btnClose && modal) {
+      btnClose.addEventListener("click", () => {
+        modal.style.display = "none";
+      });
+    }
+    window.addEventListener("click", (e) => {
+      if (e.target === modal) modal.style.display = "none";
+    });
+  });
+</script>
 {% endblock %}

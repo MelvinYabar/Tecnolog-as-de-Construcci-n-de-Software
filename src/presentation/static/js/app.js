@@ -2,11 +2,18 @@
   "use strict";
 
   const PAGE_SIZE = 60;
+  const I18N = window.I18N || {};
+
+  function t(key, fallback) {
+    if (I18N && I18N[key]) return I18N[key];
+    return fallback !== undefined ? fallback : key;
+  }
+
   const STATUS_LABEL = {
-    encontrado: "PDF encontrado",
-    no_encontrado: "PDF no encontrado",
-    posible: "Posible coincidencia",
-    vacio: "Sin nº de documento",
+    encontrado: t("filter_status_found", "PDF encontrado"),
+    no_encontrado: t("filter_status_missing", "PDF no encontrado"),
+    posible: t("filter_status_possible", "Posible coincidencia"),
+    vacio: t("filter_status_empty", "Sin nº de documento"),
   };
 
   let DATA = null;
@@ -16,9 +23,15 @@
   let sortKey = "fecha";
   let sortDir = -1;
   let selectedId = null;
-  let extraFilter = null; // { type: 'duplicado'|'sin_costo'|'fecha_invalida'|'no_pdf', label }
+  let extraFilter = null;
+  let searchHistory = [];
+  let viewCounts = {};
 
   const $ = (sel) => document.querySelector(sel);
+
+  // =========================================================================
+  // STATELESS HELPER FUNCTIONS (CLIENT-SIDE)
+  // =========================================================================
 
   function stripAccents(s) {
     return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -48,8 +61,25 @@
     if (n === null || n === undefined || n === "") return "";
     const v = Number(n);
     if (Number.isNaN(v)) return String(n);
-    return v.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    if (window.ExternalService && typeof window.ExternalService.convertFromPEN === "function") {
+      const conv = window.ExternalService.convertFromPEN(v);
+      return conv.formatted;
+    }
+    const locale = window.CURRENT_LANG === "en" ? "en-US" : "es-PE";
+    return "S/ " + v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   }
+
+  // Hook para refresco reactivo cuando cambian las tasas o divisa externa
+  window.onCurrencyChanged = function () {
+    renderTable();
+    if (selectedId) {
+      const r = records.find((x) => x.id === selectedId);
+      if (r) showDetail(r);
+    }
+  };
+  window.onCurrencyRatesLoaded = function () {
+    renderTable();
+  };
   function fmtDate(s) {
     if (!s) return "(sin fecha)";
     return s;
@@ -59,6 +89,10 @@
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
   }
+
+  // =========================================================================
+  // APP LIFECYCLE & DATA LOADING
+  // =========================================================================
 
   async function load() {
     let res;
@@ -72,19 +106,28 @@
     }
 
     if (!res || !res.ok) {
-      $("#sourceInfo").textContent = "No se pudo cargar los datos de facturas desde la Capa de Negocio.";
+      $("#sourceInfo").textContent = t("loading_data", "No se pudo cargar los datos de facturas.");
       return;
     }
     DATA = await res.json();
-    records = DATA.registros;
-    $("#sourceInfo").textContent =
-      `Fuente: ${DATA.fuente_excel || "Excel Maestro"} — hoja "${DATA.hoja || "Detalle facturas"}" — generado ${DATA.generado || "recientemente"}`;
+    records = DATA.registros || [];
+    searchHistory = DATA.search_history || [];
+
+    const sourceTpl = t("source_label", "Fuente: {source} — hoja \"{sheet}\" — generado {generated}");
+    $("#sourceInfo").textContent = sourceTpl
+      .replace("{source}", DATA.fuente_excel || "Excel Maestro")
+      .replace("{sheet}", DATA.hoja || "Detalle facturas")
+      .replace("{generated}", DATA.generado || "recientemente");
 
     fillProveedorOptions();
     renderCards();
     renderInconsistencies();
+    renderHistoryChips();
     applyFilters();
     wireEvents();
+    if (new URLSearchParams(window.location.search).get("select") === "1" && records.length > 0) {
+      setTimeout(() => selectRecord(records[0].id), 200);
+    }
   }
 
   function fillProveedorOptions() {
@@ -100,13 +143,13 @@
   function renderCards() {
     const i = DATA.indicadores || {};
     const cards = [
-      { num: i.total_registros || 0, lbl: "Registros analizados" },
-      { num: i.medicamentos_distintos || 0, lbl: "Medicamentos distintos" },
-      { num: i.pdfs_encontrados || 0, lbl: "PDFs encontrados", cls: "ok" },
-      { num: i.pdfs_faltantes || 0, lbl: "PDFs faltantes", cls: "bad" },
-      { num: i.posibles_coincidencias || 0, lbl: "Posibles coincidencias", cls: "warn" },
-      { num: i.registros_sin_documento || 0, lbl: "Registros sin nº de documento" },
-      { num: (i.pct_vinculados || 0) + "%", lbl: "% vinculados a un PDF" },
+      { num: i.total_registros || 0, lbl: t("card_total_records", "Registros analizados") },
+      { num: i.medicamentos_distintos || 0, lbl: t("card_distinct_meds", "Medicamentos distintos") },
+      { num: i.pdfs_encontrados || 0, lbl: t("card_pdfs_found", "PDFs encontrados"), cls: "ok" },
+      { num: i.pdfs_faltantes || 0, lbl: t("card_pdfs_missing", "PDFs faltantes"), cls: "bad" },
+      { num: i.posibles_coincidencias || 0, lbl: t("card_possible_matches", "Posibles coincidencias"), cls: "warn" },
+      { num: i.registros_sin_documento || 0, lbl: t("card_no_doc_number", "Registros sin nº de documento") },
+      { num: (i.pct_vinculados || 0) + "%", lbl: t("card_pct_linked", "% vinculados a un PDF") },
     ];
     $("#cards").innerHTML = cards
       .map(
@@ -118,12 +161,12 @@
   function renderInconsistencies() {
     const inc = (DATA.indicadores && DATA.indicadores.inconsistencias) || DATA.inconsistencias || {};
     const items = [
-      { key: "filas_duplicadas", label: "Filas duplicadas", filter: "duplicado" },
-      { key: "medicamentos_sin_costo", label: "Medicamentos sin costo", filter: "sin_costo" },
-      { key: "fechas_invalidas", label: "Fechas vacías o inválidas", filter: "fecha_invalida" },
-      { key: "documentos_vacios", label: "Sin número de documento", filter: "vacio" },
-      { key: "pdfs_faltantes", label: "Archivos PDF faltantes", filter: "no_encontrado" },
-      { key: "posibles_coincidencias_multiples", label: "Con más de una posible coincidencia", filter: "posible_multi" },
+      { key: "filas_duplicadas", label: t("inc_duplicate_rows", "Filas duplicadas"), filter: "duplicado" },
+      { key: "medicamentos_sin_costo", label: t("inc_medicines_no_cost", "Medicamentos sin costo"), filter: "sin_costo" },
+      { key: "fechas_invalidas", label: t("inc_invalid_dates", "Fechas vacías o inválidas"), filter: "fecha_invalida" },
+      { key: "documentos_vacios", label: t("inc_empty_docs", "Sin número de documento"), filter: "vacio" },
+      { key: "pdfs_faltantes", label: t("inc_missing_pdfs", "Archivos PDF faltantes"), filter: "no_encontrado" },
+      { key: "posibles_coincidencias_multiples", label: t("inc_multiple_matches", "Con más de una posible coincidencia"), filter: "posible_multi" },
     ];
     $("#inconsList").innerHTML = items
       .map(
@@ -134,6 +177,25 @@
     $("#inconsList").querySelectorAll(".inconsistency-item").forEach((el) => {
       el.addEventListener("click", () => {
         applyIncFilter(el.dataset.filter);
+      });
+    });
+  }
+
+  function renderHistoryChips() {
+    const historyBox = $("#historyBox");
+    if (!historyBox) return;
+    if (!searchHistory.length) {
+      historyBox.innerHTML = "";
+      return;
+    }
+    const hTitle = t("history_title", "Historial de búsquedas recientes (Estado de Sesión - Stateful):");
+    historyBox.innerHTML = `<div class="fuzzy-box" style="border-style: solid; border-color: #2a3b4a; background: #16212c;"><div class="fz-title">${escapeHtml(hTitle)}</div>` +
+      searchHistory.map((q) => `<span class="fuzzy-chip history-chip" data-v="${escapeHtml(q)}" style="border-color: #4da3ff; color: #4da3ff;">🕒 ${escapeHtml(q)}</span>`).join("") +
+      `</div>`;
+    historyBox.querySelectorAll(".history-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        $("#qMed").value = chip.dataset.v;
+        applyFilters();
       });
     });
   }
@@ -181,6 +243,7 @@
   function currentFilters() {
     return {
       q: normText($("#qMed").value),
+      qRaw: $("#qMed").value.trim(),
       qWords: normText($("#qMed").value).split(" ").filter(Boolean),
       fechaDesde: $("#fFechaDesde").value || null,
       fechaHasta: $("#fFechaHasta").value || null,
@@ -218,13 +281,29 @@
     return true;
   }
 
-  function applyFilters() {
+  async function applyFilters() {
     const f = currentFilters();
     filtered = records.filter((r) => matchesRecord(r, f));
     sortFiltered();
     page = 0;
     renderFuzzy(f);
     renderTable();
+
+    // Guardar búsqueda en sesión stateful del backend si hay texto
+    if (f.qRaw) {
+      try {
+        const hRes = await fetch("/api/stateful/search-history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: f.qRaw })
+        });
+        if (hRes.ok) {
+          const hData = await hRes.json();
+          searchHistory = hData.search_history || [];
+          renderHistoryChips();
+        }
+      } catch (e) {}
+    }
   }
 
   function sortFiltered() {
@@ -263,12 +342,14 @@
     scored.sort((a, b) => b.score - a.score);
     const top = scored.slice(0, 8);
     if (!top.length) {
+      const emptyTpl = t("fuzzy_empty", "No se encontraron coincidencias exactas ni variaciones cercanas para \"{query}\".");
       box.innerHTML = directHit
         ? ""
-        : `<div class="fuzzy-box">No se encontraron coincidencias exactas ni variaciones cercanas para "${escapeHtml($("#qMed").value)}".</div>`;
+        : `<div class="fuzzy-box">${emptyTpl.replace("{query}", escapeHtml($("#qMed").value))}</div>`;
       return;
     }
-    box.innerHTML = `<div class="fuzzy-box"><div class="fz-title">¿Quizás buscaba? (sugerencias calculadas en cliente)</div>` +
+    const fzTitle = t("fuzzy_title", "¿Quizás buscaba? (Sugerencias calculadas - Stateless):");
+    box.innerHTML = `<div class="fuzzy-box"><div class="fz-title">${escapeHtml(fzTitle)}</div>` +
       top.map((t) => `<span class="fuzzy-chip" data-v="${escapeHtml(t.original)}">${escapeHtml(t.original)}</span>`).join("") +
       `</div>`;
     box.querySelectorAll(".fuzzy-chip").forEach((chip) => {
@@ -286,8 +367,9 @@
     const start = page * PAGE_SIZE;
     const pageItems = filtered.slice(start, start + PAGE_SIZE);
 
-    $("#resultMeta").textContent = `${total} registro(s) encontrado(s)` +
-      (extraFilter ? " — filtro de inconsistencia activo" : "");
+    const foundTpl = t("results_found", "{count} registro(s) encontrado(s)");
+    $("#resultMeta").textContent = foundTpl.replace("{count}", total) +
+      (extraFilter ? t("filter_active_issue", " — filtro de inconsistencia activo") : "");
 
     $("#tbody").innerHTML = pageItems
       .map((r) => {
@@ -314,35 +396,51 @@
       });
     });
 
-    $("#pagerInfo").textContent = `Página ${page + 1} de ${totalPages}`;
+    const pageTpl = t("page_info", "Página {current} de {total}");
+    $("#pagerInfo").textContent = pageTpl.replace("{current}", page + 1).replace("{total}", totalPages);
     $("#btnPrev").disabled = page <= 0;
     $("#btnNext").disabled = page >= totalPages - 1;
   }
 
-  function selectRecord(id) {
+  async function selectRecord(id) {
     selectedId = id;
     const r = records.find((x) => x.id === id);
     if (!r) return;
     renderTable();
+
+    // [STATEFUL 1] Registrar y actualizar contador de visualizaciones en el backend
+    try {
+      const vRes = await fetch(`/api/stateful/track-view/${id}`, { method: "POST" });
+      if (vRes.ok) {
+        const vData = await vRes.json();
+        viewCounts[id] = vData.total_views;
+      }
+    } catch (e) {}
+
     showDetail(r);
   }
 
   function showDetail(r) {
     $("#detailPanel").style.display = "";
+    const views = viewCounts[r.id] || 1;
+    const viewsTpl = t("views_badge", "👁 {count} vista(s)");
+    const viewsText = viewsTpl.replace("{count}", views);
+
     const kv = [
-      ["Medicamento", r.producto],
-      ["Proveedor", r.proveedor],
-      ["Fecha factura", r.fecha || "(sin fecha)"],
-      ["N° factura", r.documento || "(vacío)"],
-      ["Cantidad", `${r.cantidad ?? ""} ${r.um || ""}`],
-      ["Precio unitario", fmtMoney(r.precio_unitario)],
-      ["Importe total", fmtMoney(r.importe_total)],
-      ["Unidades/caja", r.unidades_caja ?? ""],
-      ["Unidades totales", r.unidades_totales ?? ""],
-      ["Costo por unidad", fmtMoney(r.costo_unidad)],
-      ["Método de detección", r.metodo_deteccion || ""],
-      ["Fuente (hoja original)", r.fuente || ""],
-      ["Estado PDF", `<span class="badge ${r.pdf_status}">${STATUS_LABEL[r.pdf_status]}</span> — ${escapeHtml(r.pdf_match_mode || "")}`],
+      [t("detail_med", "Medicamento"), r.producto],
+      [t("detail_provider", "Proveedor"), r.proveedor],
+      [t("detail_date", "Fecha factura"), r.fecha || "(sin fecha)"],
+      [t("detail_doc", "N° factura"), r.documento || "(vacío)"],
+      [t("detail_qty", "Cantidad"), `${r.cantidad ?? ""} ${r.um || ""}`],
+      [t("detail_unit_price", "Precio unitario"), fmtMoney(r.precio_unitario)],
+      [t("detail_total_amount", "Importe total"), fmtMoney(r.importe_total)],
+      [t("detail_units_box", "Unidades/caja"), r.unidades_caja ?? ""],
+      [t("detail_total_units", "Unidades totales"), r.unidades_totales ?? ""],
+      [t("detail_unit_cost_stateless", "Costo por unidad (Stateless)"), fmtMoney(r.costo_unidad)],
+      [t("detail_detection_method", "Método de detección"), r.metodo_deteccion || ""],
+      [t("detail_views_stateful", "Visualizaciones (Stateful)"), `<span class="badge ok">${escapeHtml(viewsText)}</span>`],
+      [t("detail_source_sheet", "Fuente (hoja original)"), r.fuente || ""],
+      [t("detail_pdf_status", "Estado PDF"), `<span class="badge ${r.pdf_status}">${STATUS_LABEL[r.pdf_status]}</span> — ${escapeHtml(r.pdf_match_mode || "")}`],
     ];
     $("#detailKv").innerHTML = kv
       .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${typeof v === "string" && v.includes("<span") ? v : escapeHtml(v)}</div>`)
@@ -353,7 +451,7 @@
     const cands = rawCands.map((c) => (typeof c === "string" ? c : c.path || c.filename || ""));
 
     if (r.pdf_status === "posible" && cands.length > 1) {
-      candArea.innerHTML = `<div class="hint">Hay varias coincidencias posibles. Seleccione la correcta para previsualizar:</div>
+      candArea.innerHTML = `<div class="hint">${escapeHtml(t("detail_multiple_matches", "Hay varias coincidencias posibles. Seleccione la correcta para previsualizar:"))}</div>
         <div class="candidate-list">${cands
           .map((c) => `<button class="small cand-btn" data-p="${escapeHtml(c)}">${escapeHtml(c.split("/").pop())}</button>`)
           .join("")}</div>`;
@@ -375,9 +473,9 @@
 
   function showPdfEmpty(status) {
     const msg = status === "vacio"
-      ? "Este registro no tiene número de documento; no se puede buscar el PDF."
-      : "No se encontró un PDF que coincida con este registro.";
-    $("#pdfFrameWrap").innerHTML = `<div class="pdf-empty">${msg}</div>`;
+      ? t("detail_empty_no_doc", "Este registro no tiene número de documento; no se puede buscar el PDF.")
+      : t("detail_empty_not_found", "No se encontró un PDF que coincida con este registro.");
+    $("#pdfFrameWrap").innerHTML = `<div class="pdf-empty">${escapeHtml(msg)}</div>`;
     $("#pdfHint").textContent = "";
   }
 
@@ -385,7 +483,11 @@
     const cleanRel = relPath.startsWith("COMPRAS/") ? relPath : ("COMPRAS/" + relPath.replace(/^COMPRAS[\/\\]/, ""));
     const url = "/" + cleanRel.split("/").map(encodeURIComponent).join("/");
     $("#pdfFrameWrap").innerHTML = `<iframe src="${url}"></iframe>`;
-    $("#pdfHint").innerHTML = `Archivo: ${escapeHtml(relPath)} — <a href="${url}" target="_blank" rel="noopener">Abrir en pestaña nueva</a>`;
+    
+    const fileTpl = t("detail_file_label", "Archivo: {path}");
+    const fileText = fileTpl.replace("{path}", escapeHtml(relPath));
+    const openText = t("detail_open_new_tab", "Abrir en pestaña nueva");
+    $("#pdfHint").innerHTML = `${fileText} — <a href="${url}" target="_blank" rel="noopener">${escapeHtml(openText)}</a>`;
   }
 
   function wireEvents() {
